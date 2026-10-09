@@ -8,7 +8,7 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, updateProviderConnection, getProviderConnectionById } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -332,7 +332,19 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         credentials.connectionId, result.status, model,
         refreshedCredentials.accessToken, credentials.providerSpecificData
       );
-      if (quotaResetMs) resetsAtMs = quotaResetMs;
+      if (quotaResetMs) {
+        resetsAtMs = quotaResetMs;
+        try {
+          const conn = typeof getProviderConnectionById === "function" ? await getProviderConnectionById(credentials.connectionId) : null;
+          const currentQuotas = { ...(conn?.cachedQuotas || {}) };
+          currentQuotas[model] = { remainingPercentage: 0, resetAt: new Date(quotaResetMs).toISOString() };
+          if (typeof updateProviderConnection === "function") {
+            await updateProviderConnection(credentials.connectionId, { cachedQuotas: currentQuotas });
+          }
+        } catch (e) {
+          // non-blocking
+        }
+      }
     }
 
     // Exhausted Antigravity model is blocked only in RAM cache until upstream resetAt.
