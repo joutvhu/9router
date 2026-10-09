@@ -340,4 +340,70 @@ describe("Earliest Quota Reset Routing Strategy", () => {
       vi.useRealTimers();
     }
   });
+
+  it("prevents cross-model quota leakage when an unrelated model is exhausted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    mocks.getProviderConnections.mockResolvedValue([
+      {
+        id: "conn-multi",
+        priority: 1,
+        isActive: true,
+        cachedQuotas: {
+          "claude-3-7-sonnet": { remainingPercentage: 0, resetAt: RESET_IN_1H },
+        },
+      },
+    ]);
+
+    try {
+      // 1. Quota resolution for requested model claude-3-5-haiku does NOT match claude-3-7-sonnet
+      const quotaHaiku = resolveConnectionQuota(
+        { cachedQuotas: { "claude-3-7-sonnet": { remainingPercentage: 0, resetAt: RESET_IN_1H } } },
+        "claude-3-5-haiku",
+        "claude"
+      );
+      expect(quotaHaiku).toBeNull();
+
+      // 2. getProviderCredentials for claude-3-5-haiku does NOT skip conn-multi
+      const creds = await getProviderCredentials("claude", null, "claude-3-5-haiku");
+      expect(creds).not.toBeNull();
+      expect(creds.connectionId).toBe("conn-multi");
+
+      // 3. But requesting claude-3-7-sonnet IS blocked as exhausted
+      const credsSonnet = await getProviderCredentials("claude", null, "claude-3-7-sonnet");
+      expect(credsSonnet.allRateLimited).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not write cachedQuotas on transient 429 without explicit resetsAtMs", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    mocks.getProviderConnections.mockResolvedValue([
+      {
+        id: "conn-transient",
+        name: "Transient Throttled",
+        cachedQuotas: {
+          session: { remainingPercentage: 80, resetAt: RESET_IN_3H },
+        },
+      },
+    ]);
+
+    try {
+      // Transient 429 with no resetsAtMs (e.g. concurrency limit)
+      await markAccountUnavailable("conn-transient", 429, "Too Many Requests", "claude", "claude-3-5-sonnet", null);
+
+      expect(mocks.updateProviderConnection).toHaveBeenCalledWith(
+        "conn-transient",
+        expect.not.objectContaining({
+          cachedQuotas: expect.anything(),
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

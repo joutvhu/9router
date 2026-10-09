@@ -52,7 +52,9 @@ export function resolveConnectionQuota(conn, model, providerId, antigravityQuota
     if (!cleanModel) return true;
     const lowerKey = key.toLowerCase();
     const lowerModel = cleanModel.toLowerCase();
-    if (lowerKey === lowerModel || lowerKey.includes(lowerModel)) return true;
+    if (lowerKey === lowerModel) return true;
+    const strippedKey = lowerKey.replace(/^[^/]+\//, "");
+    if (strippedKey === lowerModel) return true;
     if (
       lowerKey.includes("session") ||
       lowerKey.includes("weekly") ||
@@ -117,9 +119,10 @@ export function resolveConnectionQuota(conn, model, providerId, antigravityQuota
     if (cand && (cand.resetAt || cand.remainingPercentage !== undefined)) return cand;
   }
 
-  // 6. Any quota bucket with earliest future resetAt
+  // 6. Relevant quota bucket with earliest future resetAt (or any bucket if cleanModel is null)
   let earliestFuture = null;
-  for (const q of Object.values(quotas)) {
+  for (const [key, q] of Object.entries(quotas)) {
+    if (!isRelevantBucket(key)) continue;
     if (q && typeof q === "object" && q.resetAt) {
       const resetMs = new Date(q.resetAt).getTime();
       if (!Number.isNaN(resetMs) && resetMs > now) {
@@ -131,11 +134,14 @@ export function resolveConnectionQuota(conn, model, providerId, antigravityQuota
   }
   if (earliestFuture) return earliestFuture;
 
-  // 7. Any quota bucket
-  const firstQuota = Object.values(quotas).find(
-    (q) => q && typeof q === "object" && (q.remainingPercentage !== undefined || q.resetAt)
-  );
-  return firstQuota || null;
+  // 7. Relevant quota bucket (or any bucket if cleanModel is null)
+  for (const [key, q] of Object.entries(quotas)) {
+    if (!isRelevantBucket(key)) continue;
+    if (q && typeof q === "object" && (q.remainingPercentage !== undefined || q.resetAt)) {
+      return q;
+    }
+  }
+  return null;
 }
 
 /**
@@ -434,9 +440,9 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
   const lockUpdate = buildModelLockUpdate(githubResetAtMs ? null : model, cooldownMs);
 
   const extraUpdates = {};
-  if (status === 429 || resetsAtMs || githubResetAtMs) {
+  if (resetsAtMs || githubResetAtMs) {
     const quotaKey = model || "session";
-    const resetTime = githubResetAtMs || resetsAtMs || (Date.now() + cooldownMs);
+    const resetTime = githubResetAtMs || resetsAtMs;
     const existingQuotas = conn?.cachedQuotas || {};
     extraUpdates.cachedQuotas = {
       ...existingQuotas,

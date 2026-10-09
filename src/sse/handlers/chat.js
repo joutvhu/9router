@@ -334,16 +334,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       );
       if (quotaResetMs) {
         resetsAtMs = quotaResetMs;
-        try {
-          const conn = typeof getProviderConnectionById === "function" ? await getProviderConnectionById(credentials.connectionId) : null;
-          const currentQuotas = { ...(conn?.cachedQuotas || {}) };
-          currentQuotas[model] = { remainingPercentage: 0, resetAt: new Date(quotaResetMs).toISOString() };
-          if (typeof updateProviderConnection === "function") {
-            await updateProviderConnection(credentials.connectionId, { cachedQuotas: currentQuotas });
-          }
-        } catch (e) {
-          // non-blocking
-        }
       }
     }
 

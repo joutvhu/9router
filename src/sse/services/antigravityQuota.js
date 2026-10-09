@@ -234,7 +234,7 @@ async function _doRefresh(connectionId, accessToken, providerSpecificData, now) 
 
     try {
       if (typeof updateProviderConnection === "function") {
-        await updateProviderConnection(connectionId, { cachedQuotas: mergedQuotas });
+        await updateProviderConnection(connectionId, { cachedQuotas: usage.quotas });
       }
     } catch (e) {
       log.warn("AG_QUOTA", `${connectionId.slice(0, 8)} | failed to persist cachedQuotas: ${e.message}`);
@@ -288,16 +288,6 @@ export async function handleAntigravityQuotaError(connectionId, status, model, a
       cached[model] = { remainingPercentage: 0, resetAt: new Date(blockedUntil).toISOString() };
       quotaCache.set(connectionId, cached);
       strikeBlocks.set(key, blockedUntil);
-
-      try {
-        if (typeof updateProviderConnection === "function") {
-          const conn = typeof getProviderConnectionById === "function" ? await getProviderConnectionById(connectionId) : null;
-          const currentQuotas = { ...(conn?.cachedQuotas || {}), ...cached };
-          await updateProviderConnection(connectionId, { cachedQuotas: currentQuotas });
-        }
-      } catch (e) {
-        log.warn("AG_QUOTA", `${connectionId.slice(0, 8)} | failed to persist strike block: ${e.message}`);
-      }
 
       return blockedUntil;
     }
